@@ -1,90 +1,76 @@
 import os
 import openai
+import glob
 import xml.etree.ElementTree as ET
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
-import argparse
-import wave
-import contextlib
 
-openai.api_key = os.getenv("OPENAI_API_KEY")
+# --- Config ---
+MP3_DIR = "mp3"
+FEED_PATH = "kylecast.xml"
+AUTHOR = "Kyle Inabinette"
+SHOW_URL = "https://designer-kyle.github.io/KyleCast/"
+SHOW_TITLE = "KyleCast"
 
-MP3_DIR = Path("mp3")
-FEED_PATH = Path("kylecast.xml")
-RAW_URL_PREFIX = "https://raw.githubusercontent.com/designer-kyle/KyleCast/main/mp3"
+# --- Setup OpenAI ---
+client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-def get_file_size(path):
-    return str(path.stat().st_size)
+# --- Utility: Format pubDate ---
+def format_rfc2822(dt):
+    return dt.strftime("%a, %d %b %Y %H:%M:%S GMT")
 
-def get_audio_duration(path):
-    with contextlib.closing(wave.open(str(path), 'r')) as f:
-        frames = f.getnframes()
-        rate = f.getframerate()
-        duration = frames / float(rate)
-    total = timedelta(seconds=int(duration))
-    return str(total)
+# --- Load feed ---
+tree = ET.parse(FEED_PATH)
+root = tree.getroot()
+channel = root.find("channel")
 
-def already_in_feed(filename):
-    with open(FEED_PATH, "r") as f:
-        return filename in f.read()
+# --- Find all .mp3 files not already in the feed ---
+existing_guids = {item.find("guid").text for item in channel.findall("item")}
+new_files = [f for f in glob.glob(f"{MP3_DIR}/*.mp3") if Path(f).stem not in existing_guids]
 
-def transcribe(mp3_path):
-    print(f"Transcribing {mp3_path.name}...")
-    with mp3_path.open("rb") as f:
-        transcript = openai.Audio.transcribe("whisper-1", f)
-    return transcript["text"]
+for file_path in new_files:
+    filename = Path(file_path).name
+    guid = Path(file_path).stem
+    print(f"Transcribing {filename}...")
 
-def extract_metadata(transcript):
-    print("Extracting metadata with GPT...")
-    response = openai.ChatCompletion.create(
-        model="gpt-4o",
+    # Transcribe
+    with open(file_path, "rb") as f:
+        transcript = client.audio.transcriptions.create(
+            model="whisper-1",
+            file=f,
+            response_format="text"
+        )
+
+    print("Generating episode metadata...")
+    gpt = client.chat.completions.create(
+        model="gpt-4",
         messages=[
-            {"role": "system", "content": "You are a podcast assistant. Based on the transcript, generate a suitable episode title, a one-sentence summary, and 3-5 comma-separated tags."},
+            {"role": "system", "content": "You're a podcast producer. Return a concise title and 1-sentence description of the episode transcript."},
             {"role": "user", "content": transcript}
         ]
     )
-    return response.choices[0].message.content.strip().split("\n")
+    reply = gpt.choices[0].message.content.strip().split("\n", 1)
+    title = reply[0].strip()
+    description = reply[1].strip() if len(reply) > 1 else "No description."
 
-def create_item_xml(file_name, file_url, length, pub_date, title, description, duration):
-    return f"""
-    <item>
-      <title>{title}</title>
-      <itunes:summary>{description}</itunes:summary>
-      <enclosure url=\"{file_url}\" length=\"{length}\" type=\"audio/mpeg\"/>
-      <guid>{file_name}</guid>
-      <pubDate>{pub_date}</pubDate>
-      <itunes:duration>{duration}</itunes:duration>
-      <itunes:explicit>false</itunes:explicit>
-    </item>
-    """
+    # File metadata
+    size = os.path.getsize(file_path)
+    pub_date = format_rfc2822(datetime.utcnow())
+    url = f"{SHOW_URL}mp3/{filename}"
 
-def insert_into_feed(xml_snippet):
-    with open(FEED_PATH, "r") as f:
-        contents = f.read()
-    updated = contents.replace("</channel>", xml_snippet + "\n</channel>")
-    with open(FEED_PATH, "w") as f:
-        f.write(updated)
+    # --- Create new <item> ---
+    item = ET.Element("item")
+    ET.SubElement(item, "title").text = title
+    ET.SubElement(item, "description").text = description
+    ET.SubElement(item, "enclosure", url=url, length=str(size), type="audio/mpeg")
+    ET.SubElement(item, "guid").text = guid
+    ET.SubElement(item, "pubDate").text = pub_date
+    ET.SubElement(item, "author").text = AUTHOR
+    ET.SubElement(item, "link").text = url
 
-def main():
-    for mp3_path in MP3_DIR.glob("*.mp3"):
-        if already_in_feed(mp3_path.name):
-            print(f"Skipping {mp3_path.name} — already in feed.")
-            continue
+    # Insert at top of channel
+    channel.insert(0, item)
+    print(f"✅ Added {title} to feed.")
 
-        transcript = transcribe(mp3_path)
-        title, description, *tags = extract_metadata(transcript)
-
-        file_url = f"{RAW_URL_PREFIX}/{mp3_path.name.replace(' ', '%20')}"
-        file_length = get_file_size(mp3_path)
-        pub_date = datetime.utcnow().strftime("%a, %d %b %Y %H:%M:%S GMT")
-        duration = get_audio_duration(mp3_path)
-
-        item_xml = create_item_xml(mp3_path.name, file_url, file_length, pub_date, title, description, duration)
-        insert_into_feed(item_xml)
-        print(f"✅ Added {title} to feed.")
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--rich', action='store_true', help='Use enhanced metadata generation')
-    args = parser.parse_args()
-    main()
+# --- Save feed ---
+tree.write(FEED_PATH, encoding="UTF-8", xml_declaration=True)
