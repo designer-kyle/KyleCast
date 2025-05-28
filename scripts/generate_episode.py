@@ -1,41 +1,75 @@
-name: Auto-Generate Podcast Episode
+import os
+import openai
+import xml.etree.ElementTree as ET
+from datetime import datetime
+from pathlib import Path
 
-on:
-  push:
-    paths:
-      - 'mp3/*.mp3'
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
-jobs:
-  generate-episode:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
+MP3_DIR = Path("mp3")
+FEED_PATH = Path("kylecast.xml")
+RAW_URL_PREFIX = "https://raw.githubusercontent.com/designer-kyle/KyleCast/main/mp3"
 
-    env:
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+def get_file_size(path):
+    return str(path.stat().st_size)
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+def already_in_feed(filename):
+    with open(FEED_PATH, "r") as f:
+        return filename in f.read()
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
+def transcribe(mp3_path):
+    print(f"Transcribing {mp3_path.name}...")
+    with mp3_path.open("rb") as f:
+        transcript = openai.Audio.transcribe("whisper-1", f)
+    return transcript["text"]
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install openai
+def summarize(transcript):
+    print("Summarizing with GPT...")
+    response = openai.ChatCompletion.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": "Write a clear podcast episode title based on the transcript."},
+            {"role": "user", "content": transcript}
+        ]
+    )
+    return response.choices[0].message.content.strip()
 
-      - name: Run episode generator
-        run: |
-          python scripts/generate_episode.py
+def create_item_xml(file_name, file_url, length, pub_date, title):
+    return f"""
+    <item>
+      <title>{title}</title>
+      <enclosure url="{file_url}" length="{length}" type="audio/mpeg"/>
+      <guid>{file_name}</guid>
+      <pubDate>{pub_date}</pubDate>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    """
 
-      - name: Commit and push feed update
-        run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          git add kylecast.xml
-          git commit -m "Add new episode to feed" || echo "No changes to commit"
-          git push
+def insert_into_feed(xml_snippet):
+    with open(FEED_PATH, "r") as f:
+        contents = f.read()
+
+    updated = contents.replace("</channel>", xml_snippet + "\n</channel>")
+
+    with open(FEED_PATH, "w") as f:
+        f.write(updated)
+
+def main():
+    for mp3_path in MP3_DIR.glob("*.mp3"):
+        if already_in_feed(mp3_path.name):
+            print(f"Skipping {mp3_path.name} — already in feed.")
+            continue
+
+        transcript = transcribe(mp3_path)
+        title = summarize(transcript)
+
+        file_url = f"{RAW_URL_PREFIX}/{mp3_path.name.replace(' ', '%20')}"
+        file_length = get_file_size(mp3_path)
+        pub_date = datetime.utcnow().strftime("%a, %d %b %Y %H:%M:%S GMT")
+
+        item_xml = create_item_xml(mp3_path.name, file_url, file_length, pub_date, title)
+        insert_into_feed(item_xml)
+        print(f"✅ Added {title} to feed.")
+
+if __name__ == "__main__":
+    main()
