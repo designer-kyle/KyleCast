@@ -1,0 +1,41 @@
+name: Auto-Generate Podcast Episode
+
+on:
+  push:
+    paths:
+      - 'mp3/*.mp3'
+
+jobs:
+  generate-episode:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install openai
+
+      - name: Run episode generator
+        run: |
+          python scripts/generate_episode.py
+
+      - name: Commit and push feed update
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add kylecast.xml
+          git commit -m "Add new episode to feed" || echo "No changes to commit"
+          git push
