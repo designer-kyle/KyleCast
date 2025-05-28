@@ -20,13 +20,14 @@ def get_newest_mp3():
     return mp3_files[0] if mp3_files else None
 
 def transcribe_audio(file_path):
+    openai.api_key = os.getenv("OPENAI_API_KEY")
     with open(file_path, "rb") as audio_file:
-        response = openai.audio.transcriptions.create(
+        transcript = openai.Audio.transcribe(
             model=OPENAI_MODEL,
             file=audio_file,
             response_format="text"
         )
-    return response.strip()
+    return transcript.strip()
 
 def parse_title_and_description(transcript):
     lines = transcript.split(". ")
