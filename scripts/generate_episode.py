@@ -22,12 +22,12 @@ def get_newest_mp3():
 def transcribe_audio(file_path):
     openai.api_key = os.getenv("OPENAI_API_KEY")
     with open(file_path, "rb") as audio_file:
-        transcript = openai.Audio.transcribe(
+        transcript = openai.audio.transcriptions.create(
             model=OPENAI_MODEL,
             file=audio_file,
             response_format="text"
         )
-    return transcript.strip()
+    return transcript
 
 def parse_title_and_description(transcript):
     lines = transcript.split(". ")
