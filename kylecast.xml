@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <rss version="2.0">
   <channel>
-    <itunes:image href="https://raw.githubusercontent.com/designer-kyle/KyleCast/main/cover.jpg" />
     <title>KyleCast</title>
     <link>https://www.dropbox.com/scl/fo/fl5psv43rjndbgiyy9b1q/AN8C99fAoYUWL_heJxyo6OU?raw=1</link>
     <description>A private feed of strategy, voice notes, and podcast drafts by Kyle</description>
     <language>en-us</language>
+    <itunes:image href="https://raw.githubusercontent.com/designer-kyle/KyleCast/main/assets/show-cover.png" />
     <lastBuildDate>Tue, 28 May 2024 15:02:00 GMT</lastBuildDate>
 
     <item>
