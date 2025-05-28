@@ -1,18 +1,26 @@
-<?xml version="1.0" encoding="UTF-8" ?>
-<rss version="2.0">
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"
+     xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"
+     xmlns:atom="http://www.w3.org/2005/Atom">
+
   <channel>
     <title>KyleCast</title>
-    <link>https://www.dropbox.com/scl/fo/fl5psv43rjndbgiyy9b1q/AN8C99fAoYUWL_heJxyo6OU?raw=1</link>
-    <description>A private feed of strategy, voice notes, and podcast drafts by Kyle</description>
+    <link>https://designer-kyle.github.io/KyleCast/</link>
+    <atom:link href="https://designer-kyle.github.io/KyleCast/kylecast.xml" rel="self" type="application/rss+xml"/>
+    <description>A private feed of strategy, voice notes, and podcast drafts by Kyle.</description>
     <language>en-us</language>
+    <itunes:author>Kyle Inabinette</itunes:author>
+    <itunes:explicit>false</itunes:explicit>
+    <itunes:category text="Technology"/>
     <itunes:image href="https://raw.githubusercontent.com/designer-kyle/KyleCast/main/assets/show-cover.png" />
     <lastBuildDate>Tue, 28 May 2024 15:02:00 GMT</lastBuildDate>
 
     <item>
       <title>Reveald MPDR Go-to-Market Plan</title>
       <enclosure url="https://raw.githubusercontent.com/designer-kyle/KyleCast/main/mp3/Reveald%20MPDR%20Go-to-Market%20Plan.m4a" length="68200000" type="audio/mp4"/>
-      <guid>reveald-mpdr-plan</guid>
+      <guid isPermaLink="false">reveald-mpdr-plan</guid>
       <pubDate>Tue, 28 May 2024 15:02:00 GMT</pubDate>
+      <itunes:explicit>false</itunes:explicit>
     </item>
 
   </channel>
