@@ -1,76 +1,84 @@
+# === Podcast Episode Generator (OpenAI + GitHub Actions Compatible) ===
+
 import os
+import sys
 import openai
-import glob
 import xml.etree.ElementTree as ET
 from datetime import datetime
 from pathlib import Path
 
-# --- Config ---
-MP3_DIR = "mp3"
+# === CONFIGURATION ===
 FEED_PATH = "kylecast.xml"
-AUTHOR = "Kyle Inabinette"
-SHOW_URL = "https://designer-kyle.github.io/KyleCast/"
-SHOW_TITLE = "KyleCast"
+MP3_DIR = "mp3"
+OPENAI_MODEL = "whisper-1"
+GUID_PREFIX = "auto-episode-"
+BASE_URL = "https://designer-kyle.github.io/kylecast"
 
-# --- Setup OpenAI ---
-client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# === HELPERS ===
+def get_newest_mp3():
+    mp3_files = sorted(Path(MP3_DIR).glob("*.mp3"), key=os.path.getmtime, reverse=True)
+    return mp3_files[0] if mp3_files else None
 
-# --- Utility: Format pubDate ---
-def format_rfc2822(dt):
-    return dt.strftime("%a, %d %b %Y %H:%M:%S GMT")
-
-# --- Load feed ---
-tree = ET.parse(FEED_PATH)
-root = tree.getroot()
-channel = root.find("channel")
-
-# --- Find all .mp3 files not already in the feed ---
-existing_guids = {item.find("guid").text for item in channel.findall("item")}
-new_files = [f for f in glob.glob(f"{MP3_DIR}/*.mp3") if Path(f).stem not in existing_guids]
-
-for file_path in new_files:
-    filename = Path(file_path).name
-    guid = Path(file_path).stem
-    print(f"Transcribing {filename}...")
-
-    # Transcribe
-    with open(file_path, "rb") as f:
-        transcript = client.audio.transcriptions.create(
-            model="whisper-1",
-            file=f,
+def transcribe_audio(file_path):
+    openai.api_key = os.getenv("OPENAI_API_KEY")
+    with open(file_path, "rb") as audio_file:
+        transcript = openai.Audio.transcribe(
+            model=OPENAI_MODEL,
+            file=audio_file,
             response_format="text"
         )
+    return transcript.strip()
 
-    print("Generating episode metadata...")
-    gpt = client.chat.completions.create(
-        model="gpt-4",
-        messages=[
-            {"role": "system", "content": "You're a podcast producer. Return a concise title and 1-sentence description of the episode transcript."},
-            {"role": "user", "content": transcript}
-        ]
-    )
-    reply = gpt.choices[0].message.content.strip().split("\n", 1)
-    title = reply[0].strip()
-    description = reply[1].strip() if len(reply) > 1 else "No description."
+def parse_title_and_description(transcript):
+    lines = transcript.split(". ")
+    title = lines[0].strip()[:80] if lines else "Untitled Episode"
+    description = transcript[:400] + "..." if len(transcript) > 400 else transcript
+    return title, description
 
-    # File metadata
-    size = os.path.getsize(file_path)
-    pub_date = format_rfc2822(datetime.utcnow())
-    url = f"{SHOW_URL}mp3/{filename}"
+def load_or_create_feed():
+    if not os.path.exists(FEED_PATH):
+        root = ET.Element("rss", version="2.0")
+        channel = ET.SubElement(root, "channel")
+        ET.SubElement(channel, "title").text = "KyleCast"
+        ET.SubElement(channel, "link").text = f"{BASE_URL}/{FEED_PATH}"
+        ET.SubElement(channel, "description").text = "A private feed of strategy, voice notes, and podcast drafts by Kyle."
+        ET.SubElement(channel, "language").text = "en-us"
+        ET.SubElement(channel, "lastBuildDate").text = datetime.utcnow().strftime("%a, %d %b %Y %H:%M:%S GMT")
+        return ET.ElementTree(root)
+    return ET.parse(FEED_PATH)
 
-    # --- Create new <item> ---
+def add_episode_to_feed(tree, file_path, title, description):
+    channel = tree.getroot().find("channel")
     item = ET.Element("item")
     ET.SubElement(item, "title").text = title
     ET.SubElement(item, "description").text = description
-    ET.SubElement(item, "enclosure", url=url, length=str(size), type="audio/mpeg")
+    ET.SubElement(item, "enclosure", {
+        "url": f"{BASE_URL}/{file_path.as_posix()}",
+        "length": str(file_path.stat().st_size),
+        "type": "audio/mpeg"
+    })
+    guid = f"{GUID_PREFIX}{file_path.stem}"
     ET.SubElement(item, "guid").text = guid
+    pub_date = datetime.utcnow().strftime("%a, %d %b %Y %H:%M:%S GMT")
     ET.SubElement(item, "pubDate").text = pub_date
-    ET.SubElement(item, "author").text = AUTHOR
-    ET.SubElement(item, "link").text = url
-
-    # Insert at top of channel
     channel.insert(0, item)
-    print(f"✅ Added {title} to feed.")
+    channel.find("lastBuildDate").text = pub_date
 
-# --- Save feed ---
-tree.write(FEED_PATH, encoding="UTF-8", xml_declaration=True)
+# === MAIN ===
+def main():
+    mp3_path = get_newest_mp3()
+    if not mp3_path:
+        print("No new .mp3 files found.")
+        sys.exit(0)
+
+    print(f"Processing: {mp3_path}")
+    transcript = transcribe_audio(mp3_path)
+    title, description = parse_title_and_description(transcript)
+
+    tree = load_or_create_feed()
+    add_episode_to_feed(tree, mp3_path, title, description)
+    tree.write(FEED_PATH, encoding="utf-8", xml_declaration=True)
+    print(f"✅ Feed updated with: {title}")
+
+if __name__ == "__main__":
+    main()
